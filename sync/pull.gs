@@ -19,7 +19,8 @@ function pullFromGitHubRecursive() {
   // 1. GitHubから全ファイルを再帰的に取得
   const projectFiles = fetchFilesFromGitHub(rootUrl, githubHeaders);
 
-  // --- 2. 現在のプロジェクトのマニフェスト(appsscript.json)を確実に取得して追加 ---
+
+// --- 2. 現在のプロジェクトのマニフェスト(appsscript.json)を確実に取得して追加 ---
   const currentContent = JSON.parse(UrlFetchApp.fetch(
     `https://script.googleapis.com/v1/projects/${scriptId}/content`,
     { headers: { Authorization: "Bearer " + gasToken } }
@@ -38,9 +39,8 @@ function pullFromGitHubRecursive() {
   } else {
     throw new Error("現在のプロジェクトにマニフェストファイルが見つかりません。");
   }
+  // -----------------------------------------------------------------------
 
-  const manifest = currentContent.files.find(f => f.name === "appsscript.json");
-  if (manifest) projectFiles.push(manifest);
 
   // 3. Apps Script APIで自分自身を更新
   const updateUrl = `https://script.googleapis.com/v1/projects/${scriptId}/content`;
