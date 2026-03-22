@@ -27,5 +27,5 @@ jobs:
 
       - name: Generate config and Push (Target & Deploy)
         run: |
-          printf '%s\n' '{"scriptId":"${{ github.event.inputs.script_id }}","rootDir":"."}' > .clasp.json
+          printf '%s' '{"scriptId":"${{ github.event.inputs.script_id }}","rootDir":"."}' > .clasp.json
           clasp push -f
