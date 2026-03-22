@@ -32,10 +32,44 @@ jobs:
           fi
 
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
-          node -e "JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))"
+          node - <<'NODE'
+          try {
+            const credentials = JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'));
+
+            if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) {
+              throw new Error('CLASPRC_JSON must decode to a JSON object.');
+            }
+          } catch (error) {
+            console.error('::error::CLASPRC_JSON must contain valid JSON for your clasp credentials.');
+            console.error(error.message);
+            process.exit(1);
+          }
+          NODE
 
       - name: Generate config and Push (Target & Deploy)
+        env:
+          SCRIPT_ID: ${{ github.event.inputs.script_id }}
         run: |
-          printf '%s' '{"scriptId":"${{ github.event.inputs.script_id }}","rootDir":"."}' > .clasp.json
-          node -e "JSON.parse(require('node:fs').readFileSync('.clasp.json', 'utf8'))"
+          node - <<'NODE'
+          const fs = require('node:fs');
+
+          try {
+            const config = {
+              scriptId: process.env.SCRIPT_ID,
+              rootDir: '.',
+            };
+
+            fs.writeFileSync('.clasp.json', JSON.stringify(config));
+
+            const parsed = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
+
+            if (!parsed.scriptId || parsed.rootDir !== '.') {
+              throw new Error('.clasp.json must include scriptId and rootDir.');
+            }
+          } catch (error) {
+            console.error('::error::Failed to generate a valid .clasp.json deployment config with scriptId and rootDir.');
+            console.error(error.message);
+            process.exit(1);
+          }
+          NODE
           clasp push -f
