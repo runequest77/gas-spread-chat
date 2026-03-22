@@ -1,0 +1,29 @@
+name: Deploy to GAS
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_id:
+        description: 'Update Target Script ID'
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Create clasprc.json
+        run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+
+      - name: Push to GAS
+        run: clasp push --id ${{ github.event.inputs.script_id }} -f
