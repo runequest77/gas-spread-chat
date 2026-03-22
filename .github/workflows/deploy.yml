@@ -33,15 +33,38 @@ jobs:
 
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           node - <<'NODE'
-          try {
-            const credentials = JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'));
+          const fs = require('node:fs');
+          let credentials;
+          let credentialsText;
 
-            if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) {
-              throw new Error('CLASPRC_JSON must decode to a JSON object.');
-            }
+          try {
+            credentialsText = fs.readFileSync(process.env.HOME + '/.clasprc.json', 'utf8');
           } catch (error) {
-            console.error('::error::CLASPRC_JSON must contain valid JSON for your clasp credentials.');
+            console.error('::error::Failed to read ~/.clasprc.json after writing CLASPRC_JSON.');
             console.error(error.message);
+            process.exit(1);
+          }
+
+          try {
+            credentials = JSON.parse(credentialsText);
+          } catch (error) {
+            console.error('::error::CLASPRC_JSON must contain valid JSON syntax for your clasp credentials.');
+            console.error(error.message);
+            process.exit(1);
+          }
+
+          if (credentials === null) {
+            console.error('::error::CLASPRC_JSON decoded to null; expected a JSON object for your clasp credentials.');
+            process.exit(1);
+          }
+
+          if (Array.isArray(credentials)) {
+            console.error('::error::CLASPRC_JSON decoded to an array; expected a JSON object for your clasp credentials.');
+            process.exit(1);
+          }
+
+          if (typeof credentials !== 'object') {
+            console.error('::error::CLASPRC_JSON decoded to a non-object value; expected a JSON object for your clasp credentials.');
             process.exit(1);
           }
           NODE
@@ -54,20 +77,16 @@ jobs:
           const fs = require('node:fs');
 
           try {
-            const config = {
+            if (!process.env.SCRIPT_ID || process.env.SCRIPT_ID.trim() === '') {
+              throw new Error('A non-empty script_id input is required.');
+            }
+
+            fs.writeFileSync('.clasp.json', JSON.stringify({
               scriptId: process.env.SCRIPT_ID,
               rootDir: '.',
-            };
-
-            fs.writeFileSync('.clasp.json', JSON.stringify(config));
-
-            const parsed = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
-
-            if (!parsed.scriptId || parsed.rootDir !== '.') {
-              throw new Error('.clasp.json must include scriptId and rootDir.');
-            }
+            }, null, 2));
           } catch (error) {
-            console.error('::error::Failed to generate a valid .clasp.json deployment config with scriptId and rootDir.');
+            console.error('::error::Failed to generate a valid .clasp.json deployment config.');
             console.error(error.message);
             process.exit(1);
           }
