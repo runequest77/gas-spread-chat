@@ -29,9 +29,10 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const os = require('node:os');
+          const normalizeText = (value) => value.replace(/^\uFEFF/, '').trim();
           let credentials;
           const secretText = process.env.CLASPRC_JSON ?? '';
-          const normalizedSecretText = secretText.replace(/^\uFEFF/, '').trim();
+          const normalizedSecretText = normalizeText(secretText);
           let credentialsText = normalizedSecretText;
 
           if (normalizedSecretText === '') {
@@ -45,7 +46,7 @@ jobs:
             credentials = JSON.parse(credentialsText);
           } catch (error) {
             try {
-              credentialsText = Buffer.from(normalizedSecretText, 'base64').toString('utf8').replace(/^\uFEFF/, '').trim();
+              credentialsText = normalizeText(Buffer.from(normalizedSecretText, 'base64').toString('utf8'));
               credentials = JSON.parse(credentialsText);
             } catch {
               console.error('::error::CLASPRC_JSON must contain valid JSON syntax for your clasp credentials.');
