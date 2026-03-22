@@ -25,5 +25,10 @@ jobs:
       - name: Create clasprc.json
         run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
 
+      - name: Set Script ID and Push
+        run: |
+          clasp setting scriptId ${{ github.event.inputs.script_id }}
+          clasp push -f
+
       - name: Push to GAS
         run: clasp push --id ${{ github.event.inputs.script_id }} -f
