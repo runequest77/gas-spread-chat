@@ -22,13 +22,10 @@ jobs:
       - name: Install clasp
         run: npm install -g @google/clasp
 
-      - name: Create clasprc.json
+      - name: Create clasprc.json (Login)
         run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
 
-      - name: Set Script ID and Push
+      - name: Generate config and Push (Target & Deploy)
         run: |
-          clasp setting scriptId ${{ github.event.inputs.script_id }}
+          echo "{\"scriptId\":\"${{ github.event.inputs.script_id }}\",\"rootDir\":\".\"}" > .clasp.json
           clasp push -f
-
-      - name: Push to GAS
-        run: clasp push --id ${{ github.event.inputs.script_id }} -f
