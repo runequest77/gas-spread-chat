@@ -26,31 +26,34 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          if [ -z "$CLASPRC_JSON" ]; then
-            echo "::error::Missing CLASPRC_JSON secret. Add valid clasp credentials JSON to the repository secrets before deploying."
-            exit 1
-          fi
-
-          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           node - <<'NODE'
           const fs = require('node:fs');
+          const os = require('node:os');
+          const normalizeText = (value) => value.replace(/^\uFEFF/, '').trim();
           let credentials;
-          let credentialsText;
+          const secretText = process.env.CLASPRC_JSON ?? '';
+          const normalizedSecretText = normalizeText(secretText);
+          let credentialsText = normalizedSecretText;
 
-          try {
-            credentialsText = fs.readFileSync(process.env.HOME + '/.clasprc.json', 'utf8');
-          } catch (error) {
-            console.error('::error::Failed to read ~/.clasprc.json after writing CLASPRC_JSON.');
-            console.error(error.message);
+          if (normalizedSecretText === '') {
+            console.error('::error::GitHub Actions received an empty value for secrets.CLASPRC_JSON.');
+            console.error('::error::This usually means the workflow could not access a non-empty secret with that exact name. Check the repository or environment secret scope, spelling, and whether the run context is allowed to read secrets.');
+            console.error('::notice::If the secret content were malformed JSON or had an encoding issue, this step would continue and fail later with a JSON parsing error instead of this empty-value error.');
             process.exit(1);
           }
 
           try {
             credentials = JSON.parse(credentialsText);
           } catch (error) {
-            console.error('::error::CLASPRC_JSON must contain valid JSON syntax for your clasp credentials.');
-            console.error(error.message);
-            process.exit(1);
+            try {
+              credentialsText = normalizeText(Buffer.from(normalizedSecretText, 'base64').toString('utf8'));
+              credentials = JSON.parse(credentialsText);
+            } catch {
+              console.error('::error::CLASPRC_JSON must contain valid JSON syntax for your clasp credentials.');
+              console.error('::notice::Store either the raw contents of ~/.clasprc.json or a base64-encoded copy of that JSON.');
+              console.error(error.message);
+              process.exit(1);
+            }
           }
 
           if (credentials === null) {
@@ -65,6 +68,14 @@ jobs:
 
           if (typeof credentials !== 'object') {
             console.error('::error::CLASPRC_JSON decoded to a non-object value; expected a JSON object for your clasp credentials.');
+            process.exit(1);
+          }
+
+          try {
+            fs.writeFileSync(`${os.homedir()}/.clasprc.json`, `${JSON.stringify(credentials, null, 2)}\n`);
+          } catch (error) {
+            console.error('::error::Failed to write ~/.clasprc.json from CLASPRC_JSON.');
+            console.error(error.message);
             process.exit(1);
           }
           NODE
