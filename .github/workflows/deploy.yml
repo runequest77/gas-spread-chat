@@ -23,9 +23,19 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Create clasprc.json (Login)
-        run: printf '%s' '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          if [ -z "$CLASPRC_JSON" ]; then
+            echo "::error::Missing CLASPRC_JSON secret. Add valid clasp credentials JSON to the repository secrets before deploying."
+            exit 1
+          fi
+
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          node -e "JSON.parse(require('node:fs').readFileSync(process.env.HOME + '/.clasprc.json', 'utf8'))"
 
       - name: Generate config and Push (Target & Deploy)
         run: |
           printf '%s' '{"scriptId":"${{ github.event.inputs.script_id }}","rootDir":"."}' > .clasp.json
+          node -e "JSON.parse(require('node:fs').readFileSync('.clasp.json', 'utf8'))"
           clasp push -f
