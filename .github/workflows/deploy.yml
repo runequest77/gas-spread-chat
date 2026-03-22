@@ -23,9 +23,12 @@ jobs:
         run: npm install -g @google/clasp
 
       - name: Create clasprc.json (Login)
+        # Secretsの中身をそのままファイルに書き出す
         run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
 
       - name: Generate config and Push (Target & Deploy)
+        # 最も安全な「シングルクォート」での書き出しに変更
         run: |
-          echo "{\"scriptId\":\"${{ github.event.inputs.script_id }}\",\"rootDir\":\".\"}" > .clasp.json
+          echo '{"scriptId":"${{ github.event.inputs.script_id }}","rootDir":"."}' > .clasp.json
           clasp push -f
+          
