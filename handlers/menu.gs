@@ -10,6 +10,8 @@ function onOpen() {
       {name: 'トリガーON/OFF', functionName: 'syncEditInstallableTrigger'},
       {name: '権限を更新', functionName: 'setEditorsByList'},
       {name: '権限をチェック', functionName: 'getPermissionsTest'},
+      null,
+      {name: 'マップUI（サイドバー）', functionName: 'showMapSidebar'},
     ]
   );
 

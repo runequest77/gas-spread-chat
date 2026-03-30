@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', 'Meiryo', sans-serif;
+    font-size: 12px;
+    background: #f5f5f5;
+    overflow: auto;
+  }
+
+  #status {
+    padding: 6px 8px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    font-size: 11px;
+    color: #555;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  #status.error {
+    color: #c00;
+    background: #fff0f0;
+  }
+
+  #map-container {
+    padding: 8px;
+    overflow: auto;
+  }
+
+  #grid {
+    display: inline-grid;
+    gap: 1px;
+    background: #999;
+    border: 1px solid #999;
+    user-select: none;
+  }
+
+  .cell {
+    width: 36px;
+    height: 36px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: #888;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .cell.has-unit {
+    cursor: grab;
+  }
+
+  .cell.has-unit:active {
+    cursor: grabbing;
+  }
+
+  .unit-marker {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #2196F3;
+    border: 2px solid #0d47a1;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .cell .terrain-label {
+    position: absolute;
+    bottom: 1px;
+    right: 2px;
+    font-size: 7px;
+    color: #aaa;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  /* ドラッグ中のゴースト */
+  .drag-ghost {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(33, 150, 243, 0.5);
+    border: 2px dashed #0d47a1;
+    position: fixed;
+    pointer-events: none;
+    z-index: 100;
+    transform: translate(-50%, -50%);
+  }
+
+  /* ドラッグ中のハイライト */
+  .cell.drag-over {
+    outline: 2px solid #2196F3;
+    outline-offset: -2px;
+    background: #e3f2fd;
+  }
+
+  .cell.drag-source {
+    opacity: 0.4;
+  }
+</style>
+</head>
+<body>
+
+<div id="status">読み込み中...</div>
+<div id="map-container">
+  <div id="grid"></div>
+</div>
+
+<!-- ドラッグ中のゴースト要素 -->
+<div id="drag-ghost" class="drag-ghost" style="display:none;"></div>
+
+<script>
+/**
+ * マップサイドバー クライアントスクリプト
+ *
+ * 座標系: row, col は 1 始まり（サーバー側と統一）
+ * グリッドDOM: data-row, data-col 属性に 1 始まりの値を格納
+ */
+
+// --- 状態管理 ---
+var mapData = null;   // { data: string[][], rows: number, cols: number }
+var unitPos = null;   // { row: number, col: number } or null
+var isDragging = false;
+var dragStartCell = null; // { row, col }
+var dragCurrentCell = null;
+var dragDidMove = false;
+
+// --- 初期化 ---
+function init() {
+  setStatus('MAPデータを取得中...');
+  google.script.run
+    .withSuccessHandler(onMapDataLoaded)
+    .withFailureHandler(onError)
+    .getMapData();
+}
+
+function onMapDataLoaded(data) {
+  mapData = data;
+
+  if (!mapData || mapData.rows === 0) {
+    setStatus('MAPシートにデータがありません。', true);
+    return;
+  }
+
+  setStatus('ユニット位置を取得中...');
+  google.script.run
+    .withSuccessHandler(onUnitPositionLoaded)
+    .withFailureHandler(onError)
+    .getUnitPosition();
+}
+
+function onUnitPositionLoaded(pos) {
+  unitPos = pos;
+  renderGrid();
+  updateStatus();
+}
+
+// --- 描画 ---
+function renderGrid() {
+  var grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  grid.style.gridTemplateColumns = 'repeat(' + mapData.cols + ', 36px)';
+  grid.style.gridTemplateRows = 'repeat(' + mapData.rows + ', 36px)';
+
+  for (var r = 0; r < mapData.rows; r++) {
+    for (var c = 0; c < mapData.cols; c++) {
+      var cell = createCellElement(r + 1, c + 1, mapData.data[r][c]);
+      grid.appendChild(cell);
+    }
+  }
+}
+
+function createCellElement(row, col, terrainValue) {
+  var cell = document.createElement('div');
+  cell.className = 'cell';
+  cell.setAttribute('data-row', row);
+  cell.setAttribute('data-col', col);
+
+  // 地形ラベル
+  if (terrainValue !== '') {
+    var label = document.createElement('span');
+    label.className = 'terrain-label';
+    label.textContent = terrainValue;
+    cell.appendChild(label);
+  }
+
+  // ユニット表示
+  if (unitPos && unitPos.row === row && unitPos.col === col) {
+    var marker = document.createElement('div');
+    marker.className = 'unit-marker';
+    cell.appendChild(marker);
+    cell.classList.add('has-unit');
+  }
+
+  // イベント
+  cell.addEventListener('mousedown', onCellMouseDown);
+  cell.addEventListener('mouseenter', onCellMouseEnter);
+
+  return cell;
+}
+
+// --- ステータス表示 ---
+function updateStatus() {
+  if (unitPos) {
+    setStatus('ユニット位置: (' + unitPos.row + ', ' + unitPos.col + ') — クリックで配置 / ドラッグで移動');
+  } else {
+    setStatus('マスをクリックしてユニットを配置してください。');
+  }
+}
+
+function setStatus(msg, isError) {
+  var el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = isError ? 'error' : '';
+}
+
+// --- クリック・ドラッグイベント ---
+
+function onCellMouseDown(e) {
+  e.preventDefault();
+  var cell = getCellFromEvent(e);
+  if (!cell) return;
+
+  var row = parseInt(cell.getAttribute('data-row'), 10);
+  var col = parseInt(cell.getAttribute('data-col'), 10);
+
+  if (unitPos && unitPos.row === row && unitPos.col === col) {
+    // ユニットがある場所 → ドラッグ開始
+    startDrag(row, col, e);
+  } else {
+    // 空きマス → 後でmouseup時にクリック配置判定
+    dragStartCell = { row: row, col: col };
+    dragDidMove = false;
+  }
+}
+
+function onCellMouseEnter(e) {
+  if (!isDragging) return;
+
+  var cell = getCellFromEvent(e);
+  if (!cell) return;
+
+  // 前のハイライトをクリア
+  clearDragOverHighlight();
+
+  var row = parseInt(cell.getAttribute('data-row'), 10);
+  var col = parseInt(cell.getAttribute('data-col'), 10);
+  dragCurrentCell = { row: row, col: col };
+  cell.classList.add('drag-over');
+  dragDidMove = true;
+}
+
+function onMouseMove(e) {
+  if (!isDragging) return;
+  var ghost = document.getElementById('drag-ghost');
+  ghost.style.left = e.clientX + 'px';
+  ghost.style.top = e.clientY + 'px';
+}
+
+function onMouseUp(e) {
+  if (isDragging) {
+    // ドラッグ終了
+    endDrag();
+  } else if (dragStartCell && !dragDidMove) {
+    // クリック配置
+    placeUnit(dragStartCell.row, dragStartCell.col);
+  }
+
+  // 状態リセット
+  dragStartCell = null;
+  dragDidMove = false;
+}
+
+// --- ドラッグ操作 ---
+
+function startDrag(row, col, e) {
+  isDragging = true;
+  dragStartCell = { row: row, col: col };
+  dragCurrentCell = { row: row, col: col };
+  dragDidMove = false;
+
+  // ドラッグ元セルを半透明に
+  var srcCell = getCellByPos(row, col);
+  if (srcCell) srcCell.classList.add('drag-source');
+
+  // ゴースト表示
+  var ghost = document.getElementById('drag-ghost');
+  ghost.style.display = 'block';
+  ghost.style.left = e.clientX + 'px';
+  ghost.style.top = e.clientY + 'px';
+}
+
+function endDrag() {
+  isDragging = false;
+
+  // ゴースト非表示
+  var ghost = document.getElementById('drag-ghost');
+  ghost.style.display = 'none';
+
+  // ハイライトクリア
+  clearDragOverHighlight();
+  clearDragSource();
+
+  if (dragDidMove && dragCurrentCell) {
+    // 移動先が元と異なる場合のみ保存
+    if (dragCurrentCell.row !== dragStartCell.row || dragCurrentCell.col !== dragStartCell.col) {
+      placeUnit(dragCurrentCell.row, dragCurrentCell.col);
+      return;
+    }
+  }
+
+  dragCurrentCell = null;
+}
+
+function clearDragOverHighlight() {
+  var cells = document.querySelectorAll('.cell.drag-over');
+  for (var i = 0; i < cells.length; i++) {
+    cells[i].classList.remove('drag-over');
+  }
+}
+
+function clearDragSource() {
+  var cells = document.querySelectorAll('.cell.drag-source');
+  for (var i = 0; i < cells.length; i++) {
+    cells[i].classList.remove('drag-source');
+  }
+}
+
+// --- ユニット配置・保存 ---
+
+function placeUnit(row, col) {
+  setStatus('保存中...');
+  google.script.run
+    .withSuccessHandler(onUnitSaved)
+    .withFailureHandler(onSaveError)
+    .saveUnitPosition(row, col);
+}
+
+function onUnitSaved(pos) {
+  unitPos = pos;
+  renderGrid();
+  updateStatus();
+}
+
+function onSaveError(err) {
+  setStatus('保存エラー: ' + (err.message || err), true);
+  // 既存状態で再描画
+  renderGrid();
+}
+
+// --- ユーティリティ ---
+
+function getCellFromEvent(e) {
+  var el = e.target;
+  while (el && !el.classList.contains('cell')) {
+    el = el.parentElement;
+  }
+  return el;
+}
+
+function getCellByPos(row, col) {
+  return document.querySelector('.cell[data-row="' + row + '"][data-col="' + col + '"]');
+}
+
+function onError(err) {
+  setStatus('エラー: ' + (err.message || err), true);
+}
+
+// --- グローバルイベント ---
+document.addEventListener('mousemove', onMouseMove);
+document.addEventListener('mouseup', onMouseUp);
+
+// --- 起動 ---
+init();
+</script>
+
+</body>
+</html>
