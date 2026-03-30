@@ -1,6 +1,8 @@
 function onOpen() {
   SpreadsheetApp.getActiveSpreadsheet().addMenu('スプレッドチャット',
     [
+      {name: 'キャラクターパレット', functionName: 'showCharacterPalette'},
+      null,
       {name: '表示(チャット主体)', functionName: 'applyBaseLayout'},
       {name: '表示切替(Map主体)', functionName: 'applyMapLayout'},
       null,
