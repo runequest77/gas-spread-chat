@@ -11,6 +11,9 @@
 /** MAP シートの名前（既存定数と合わせる） */
 const MAP_SIDEBAR_SHEET_NAME = "MAP";
 
+/** MAP シートのセル値が Date の場合に使う日付フォーマット */
+const MAP_DATE_FORMAT = "yyyy-MM-dd";
+
 /**
  * サイドバーを表示する。
  * メニューから呼び出される。
@@ -51,7 +54,7 @@ function getMapData() {
           return "";
         }
         if (cell instanceof Date) {
-          return Utilities.formatDate(cell, Session.getScriptTimeZone(), "yyyy-MM-dd");
+          return Utilities.formatDate(cell, Session.getScriptTimeZone(), MAP_DATE_FORMAT);
         }
         return String(cell);
       });
@@ -137,9 +140,9 @@ function getClientConfig() {
       }
     }
 
-    // 最後の手段: ランダムキー（同一ユーザーでもタブごとに別ユーザーとなる）
+    // 最後の手段: UUID を生成する（同一ユーザーでもタブごとに別ユーザーとなる）
     if (!userKey) {
-      userKey = "anon_" + Math.random().toString(36).substring(2, 14);
+      userKey = "anon_" + Utilities.getUuid().replace(/-/g, "").substring(0, 16);
     }
 
     // 表示名: ユーザーキーの先頭 8 文字を使う（メールは露出しない）

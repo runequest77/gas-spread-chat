@@ -180,7 +180,7 @@
 </div>
 
 <!-- プレゼンス一覧 -->
-<div id="presence-bar" id="presence-bar">接続中ユーザー: 読み込み中</div>
+<div id="presence-bar">接続中ユーザー: 読み込み中</div>
 
 <!-- エラー表示 -->
 <div id="error-message"></div>
@@ -687,6 +687,7 @@ document.addEventListener("DOMContentLoaded", function() {
   バージョンは互換性が安定している 9.x compat 版を使用する。
   compat 版は firebase.initializeApp() などのグローバル構文が使えるため
   GAS サイドバーの制約下でも扱いやすい。
+  バージョンを変更する場合は下記 2 行の "9.23.0" を同じ値に揃えること。
 -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
