@@ -65,7 +65,7 @@ function getUnitPosition() {
   }
 
   try {
-    var pos = JSON.parse(posJson);
+    const pos = JSON.parse(posJson);
     if (typeof pos.row === 'number' && typeof pos.col === 'number') {
       return pos;
     }
@@ -91,13 +91,13 @@ function saveUnitPosition(row, col) {
   }
 
   // MAPシートの範囲チェック
-  var mapData = getMapData();
-  if (row > mapData.rows || col > mapData.cols) {
+  const mapInfo = getMapData();
+  if (row > mapInfo.rows || col > mapInfo.cols) {
     throw new Error('マップ範囲外です: row=' + row + ', col=' + col);
   }
 
-  var pos = { row: row, col: col };
-  var userProps = PropertiesService.getUserProperties();
+  const pos = { row: row, col: col };
+  const userProps = PropertiesService.getUserProperties();
   userProps.setProperty('mapUnitPosition', JSON.stringify(pos));
 
   return pos;
