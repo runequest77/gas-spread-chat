@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Noto Sans JP', 'Meiryo', sans-serif;
+      font-size: 13px;
+      margin: 8px;
+      color: #333;
+    }
+    h3 {
+      margin: 0 0 8px 0;
+      font-size: 14px;
+      color: #1a73e8;
+    }
+    select {
+      width: 100%;
+      padding: 4px 6px;
+      font-size: 13px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+    #status {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    #saveArea {
+      margin-bottom: 8px;
+    }
+    #saveBtn {
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      padding: 6px 16px;
+      font-size: 13px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #saveBtn:hover {
+      background: #1558b0;
+    }
+    #saveBtn:disabled {
+      background: #aaa;
+      cursor: default;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      background: #1a73e8;
+      color: #fff;
+      padding: 4px 6px;
+      text-align: left;
+      font-size: 12px;
+    }
+    thead th.th-row {
+      width: 30px;
+      text-align: center;
+    }
+    thead th.th-key {
+      width: calc(55% - 15px);
+    }
+    thead th.th-val {
+      width: calc(45% - 15px);
+      text-align: right;
+    }
+    tbody tr {
+      cursor: pointer;
+    }
+    tbody tr:nth-child(even) {
+      background: #f5f5f5;
+    }
+    tbody tr:hover {
+      background: #e8f0fe;
+    }
+    tbody td {
+      padding: 2px 4px;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .td-row {
+      text-align: center;
+      color: #999;
+      font-size: 11px;
+      width: 30px;
+    }
+    .td-key input, .td-val input {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      font-size: 13px;
+      padding: 2px 4px;
+      font-family: inherit;
+    }
+    .td-key input:focus, .td-val input:focus {
+      border-color: #1a73e8;
+      background: #fff;
+      outline: none;
+    }
+    .td-val input {
+      text-align: right;
+    }
+    .edited input {
+      background: #fff8e1;
+    }
+    #hint {
+      margin-top: 8px;
+      font-size: 11px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <h3>🎲 キャラクターパレット</h3>
+
+  <select id="characterSelect">
+    <option value="">キャラクターを選択...</option>
+  </select>
+
+  <div id="saveArea" style="display:none;">
+    <button id="saveBtn" onclick="saveSkills()">💾 保存</button>
+  </div>
+
+  <div id="status">読み込み中...</div>
+
+  <table id="skillTable" style="display:none;">
+    <thead>
+      <tr>
+        <th class="th-row">#</th>
+        <th class="th-key">技能・属性</th>
+        <th class="th-val">値</th>
+      </tr>
+    </thead>
+    <tbody id="skillBody"></tbody>
+  </table>
+
+  <div id="hint" style="display:none;">
+    ダブルクリックでアクティブセルにロールコマンドを入力
+  </div>
+
+  <script>
+    var currentPaletteNo = null;
+
+    // 起動時にキャラクターリストを取得
+    google.script.run
+      .withSuccessHandler(populateCharacterList)
+      .withFailureHandler(function(err) {
+        document.getElementById('status').textContent = 'エラー: ' + err.message;
+      })
+      .getCharacterList();
+
+    function populateCharacterList(characters) {
+      var select = document.getElementById('characterSelect');
+      if (!characters || characters.length === 0) {
+        document.getElementById('status').textContent = 'キャラクターが見つかりません。';
+        return;
+      }
+      characters.forEach(function(ch) {
+        var opt = document.createElement('option');
+        opt.value = ch.no;
+        opt.textContent = ch.no + ': ' + ch.name;
+        select.appendChild(opt);
+      });
+      document.getElementById('status').textContent = '';
+    }
+
+    document.getElementById('characterSelect').addEventListener('change', function() {
+      var paletteNo = this.value;
+      if (paletteNo === '') {
+        currentPaletteNo = null;
+        document.getElementById('skillTable').style.display = 'none';
+        document.getElementById('hint').style.display = 'none';
+        document.getElementById('saveArea').style.display = 'none';
+        document.getElementById('status').textContent = '';
+        return;
+      }
+      currentPaletteNo = Number(paletteNo);
+      document.getElementById('status').textContent = '読み込み中...';
+      document.getElementById('skillTable').style.display = 'none';
+      document.getElementById('hint').style.display = 'none';
+      document.getElementById('saveArea').style.display = 'none';
+      google.script.run
+        .withSuccessHandler(populateSkillTable)
+        .withFailureHandler(function(err) {
+          document.getElementById('status').textContent = 'エラー: ' + err.message;
+        })
+        .getCharacterSkills(currentPaletteNo);
+    });
+
+    function populateSkillTable(skills) {
+      var tbody = document.getElementById('skillBody');
+      tbody.innerHTML = '';
+
+      if (!skills || skills.length === 0) {
+        document.getElementById('status').textContent = '技能データがありません。';
+        return;
+      }
+
+      skills.forEach(function(skill) {
+        var tr = document.createElement('tr');
+        tr.dataset.row = skill.row;
+        tr.dataset.origKey = skill.key;
+        tr.dataset.origVal = skill.value;
+
+        // 行番号
+        var tdRow = document.createElement('td');
+        tdRow.className = 'td-row';
+        tdRow.textContent = skill.row;
+
+        // 技能名（編集可能）
+        var tdKey = document.createElement('td');
+        tdKey.className = 'td-key';
+        var inputKey = document.createElement('input');
+        inputKey.type = 'text';
+        inputKey.value = skill.key;
+        inputKey.addEventListener('input', function() { markEdited(tr); });
+        tdKey.appendChild(inputKey);
+
+        // 技能値（編集可能）
+        var tdVal = document.createElement('td');
+        tdVal.className = 'td-val';
+        var inputVal = document.createElement('input');
+        inputVal.type = 'text';
+        inputVal.value = skill.value;
+        inputVal.addEventListener('input', function() { markEdited(tr); });
+        tdVal.appendChild(inputVal);
+
+        tr.appendChild(tdRow);
+        tr.appendChild(tdKey);
+        tr.appendChild(tdVal);
+
+        // ダブルクリックでロールコマンド入力
+        tr.addEventListener('dblclick', function() {
+          var key = tr.querySelector('.td-key input').value;
+          insertRollCommand(key);
+        });
+
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('status').textContent = '';
+      document.getElementById('skillTable').style.display = 'table';
+      document.getElementById('hint').style.display = 'block';
+      document.getElementById('saveArea').style.display = 'block';
+    }
+
+    function markEdited(tr) {
+      var origKey = tr.dataset.origKey;
+      var origVal = tr.dataset.origVal;
+      var curKey = tr.querySelector('.td-key input').value;
+      var curVal = tr.querySelector('.td-val input').value;
+      if (curKey !== origKey || curVal !== origVal) {
+        tr.classList.add('edited');
+      } else {
+        tr.classList.remove('edited');
+      }
+    }
+
+    function saveSkills() {
+      if (currentPaletteNo === null) return;
+      var rows = document.querySelectorAll('#skillBody tr.edited');
+      if (rows.length === 0) {
+        document.getElementById('status').textContent = '変更はありません。';
+        setTimeout(function() { document.getElementById('status').textContent = ''; }, 2000);
+        return;
+      }
+
+      var data = [];
+      rows.forEach(function(tr) {
+        data.push({
+          row: Number(tr.dataset.row),
+          key: tr.querySelector('.td-key input').value,
+          value: tr.querySelector('.td-val input').value
+        });
+      });
+
+      document.getElementById('saveBtn').disabled = true;
+      document.getElementById('status').textContent = '保存中...';
+
+      google.script.run
+        .withSuccessHandler(function() {
+          // 保存成功：editedマーカーをクリアし、元の値を更新
+          rows.forEach(function(tr) {
+            tr.dataset.origKey = tr.querySelector('.td-key input').value;
+            tr.dataset.origVal = tr.querySelector('.td-val input').value;
+            tr.classList.remove('edited');
+          });
+          document.getElementById('saveBtn').disabled = false;
+          document.getElementById('status').textContent = '保存しました。';
+          setTimeout(function() { document.getElementById('status').textContent = ''; }, 2000);
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('saveBtn').disabled = false;
+          document.getElementById('status').textContent = 'エラー: ' + err.message;
+        })
+        .saveCharacterSkills(currentPaletteNo, data);
+    }
+
+    function insertRollCommand(key) {
+      var command = '/' + key;
+      google.script.run
+        .withSuccessHandler(function() {
+          document.getElementById('status').textContent = '「' + command + '」を入力しました。';
+          setTimeout(function() {
+            document.getElementById('status').textContent = '';
+          }, 2000);
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById('status').textContent = 'エラー: ' + err.message;
+        })
+        .insertRollCommandToActiveCell(command);
+    }
+  </script>
+</body>
+</html>
