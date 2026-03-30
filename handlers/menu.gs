@@ -4,6 +4,8 @@ function onOpen() {
       {name: '表示(チャット主体)', functionName: 'applyBaseLayout'},
       {name: '表示切替(Map主体)', functionName: 'applyMapLayout'},
       null,
+      {name: '共有マップを開く', functionName: 'showSidebar'},
+      null,
       {name: 'CurrentMapを登録', functionName: 'setCurrentMap'},
       null,
       {name: 'キャッシュクリア', functionName: 'clearScriptCache'},

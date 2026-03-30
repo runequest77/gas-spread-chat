@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>共有マップ</title>
+  <style>
+    /* ===== リセット・基本 ===== */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 12px;
+      background: #f5f5f5;
+      color: #333;
+      overflow-x: hidden;
+    }
+
+    /* ===== ステータスバー ===== */
+    #status-bar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #1a73e8;
+      color: #fff;
+      padding: 4px 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      min-height: 28px;
+    }
+    #status-bar .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ccc;
+      flex-shrink: 0;
+    }
+    #status-bar .dot.connected    { background: #4caf50; }
+    #status-bar .dot.connecting   { background: #ff9800; }
+    #status-bar .dot.disconnected { background: #f44336; }
+    #status-bar #status-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ===== プレゼンス一覧 ===== */
+    #presence-bar {
+      background: #e8f0fe;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #555;
+      border-bottom: 1px solid #c5cae9;
+      min-height: 24px;
+    }
+
+    /* ===== ローディング・エラー ===== */
+    #loading-overlay {
+      padding: 20px 8px;
+      text-align: center;
+      color: #888;
+    }
+    #error-message {
+      display: none;
+      background: #fce4ec;
+      border-left: 4px solid #e53935;
+      padding: 8px 10px;
+      margin: 8px;
+      font-size: 11px;
+      color: #b71c1c;
+      border-radius: 2px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* ===== マップコンテナ ===== */
+    #map-container {
+      overflow: auto;
+      padding: 8px;
+      display: none; /* マップ読み込み後に表示 */
+    }
+
+    /* ===== グリッド ===== */
+    #grid-table {
+      border-collapse: collapse;
+      user-select: none;
+    }
+    .grid-cell {
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      border: 1px solid #bdbdbd;
+      background: #fff;
+      position: relative;
+      vertical-align: middle;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .grid-cell:hover {
+      background: #e3f2fd;
+    }
+    .grid-cell.drag-over {
+      background: #bbdefb;
+      border-color: #1565c0;
+    }
+
+    /* ===== 地形テキスト ===== */
+    .terrain-label {
+      font-size: 9px;
+      color: #9e9e9e;
+      pointer-events: none;
+      position: absolute;
+      bottom: 1px;
+      right: 2px;
+      line-height: 1;
+      max-width: 28px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ===== ユニット ===== */
+    .unit {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      font-weight: bold;
+      color: #fff;
+      pointer-events: none;
+      z-index: 1;
+      transition: box-shadow 0.1s;
+      text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .unit.mine {
+      border-color: #fff;
+      box-shadow: 0 0 0 2px #1a73e8;
+      cursor: grab;
+    }
+    .unit.dragging {
+      opacity: 0.5;
+      box-shadow: 0 0 0 3px #ff9800;
+    }
+
+    /* ===== 凡例・操作ガイド ===== */
+    #legend {
+      padding: 6px 8px;
+      font-size: 10px;
+      color: #666;
+      border-top: 1px solid #e0e0e0;
+    }
+    #legend p { margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- ステータスバー -->
+<div id="status-bar">
+  <div class="dot" id="conn-dot"></div>
+  <span id="status-text">初期化中...</span>
+</div>
+
+<!-- プレゼンス一覧 -->
+<div id="presence-bar" id="presence-bar">接続中ユーザー: 読み込み中</div>
+
+<!-- エラー表示 -->
+<div id="error-message"></div>
+
+<!-- ローディング -->
+<div id="loading-overlay">マップデータを読み込み中...</div>
+
+<!-- マップ本体 -->
+<div id="map-container">
+  <table id="grid-table"></table>
+</div>
+
+<!-- 凡例 -->
+<div id="legend">
+  <p>● 自分のユニット（青枠）をドラッグして移動</p>
+  <p>● 未配置の場合は空きマスをクリックして配置</p>
+</div>
+
+<script>
+// =============================================================================
+// 定数・グローバル状態
+// =============================================================================
+
+/** Firebase Realtime Database のルームパス */
+var ROOM_PATH = "rooms/default";
+
+/** セルサイズ (px) */
+var CELL_SIZE = 32;
+
+/** ユニット色パレット（userKey のハッシュで決定する） */
+var UNIT_COLORS = [
+  "#e53935", "#8e24aa", "#1e88e5", "#00897b",
+  "#f4511e", "#6d4c41", "#039be5", "#43a047",
+  "#fb8c00", "#b0bec5"
+];
+
+/** アプリ状態 */
+var appState = {
+  clientConfig:    null,  // getClientConfig() の結果
+  mapData:         null,  // getMapData() の結果
+  firebaseApp:     null,  // Firebase app インスタンス
+  db:              null,  // Firebase database インスタンス
+  units:           {},    // { userKey: { name, row, col, updatedAt } }
+  presence:        {},    // { userKey: true/false }
+  dragState: {
+    isDragging:    false,
+    sourceRow:     null,
+    sourceCol:     null,
+    startX:        0,
+    startY:        0
+  }
+};
+
+// =============================================================================
+// ユーティリティ
+// =============================================================================
+
+/**
+ * userKey からユニット色を決定する。
+ * @param {string} userKey
+ * @returns {string} CSS カラー文字列
+ */
+function resolveUnitColor(userKey) {
+  var hash = 0;
+  for (var i = 0; i < userKey.length; i++) {
+    hash = ((hash << 5) - hash) + userKey.charCodeAt(i);
+    hash |= 0;
+  }
+  return UNIT_COLORS[Math.abs(hash) % UNIT_COLORS.length];
+}
+
+/**
+ * エラーメッセージを表示する。
+ * @param {string} msg
+ */
+function showError(msg) {
+  var el = document.getElementById("error-message");
+  el.textContent = msg;
+  el.style.display = "block";
+  setStatus("error", "エラーが発生しました");
+}
+
+/**
+ * ステータスバーを更新する。
+ * @param {"connecting"|"connected"|"disconnected"|"error"} state
+ * @param {string} text
+ */
+function setStatus(state, text) {
+  var dot  = document.getElementById("conn-dot");
+  var span = document.getElementById("status-text");
+  dot.className = "dot " + state;
+  span.textContent = text;
+}
+
+/**
+ * プレゼンス一覧バーを更新する。
+ * @param {{ [userKey: string]: boolean }} presenceMap
+ * @param {{ [userKey: string]: { name: string } }} unitsMap
+ */
+function updatePresenceBar(presenceMap, unitsMap) {
+  var onlineKeys = Object.keys(presenceMap).filter(function(k) {
+    return presenceMap[k] === true;
+  });
+  var names = onlineKeys.map(function(k) {
+    var unit = unitsMap[k];
+    return unit ? unit.name : ("User-" + k.substring(0, 8));
+  });
+  var bar = document.getElementById("presence-bar");
+  if (names.length === 0) {
+    bar.textContent = "接続中ユーザー: なし";
+  } else {
+    bar.textContent = "接続中(" + names.length + "): " + names.join(", ");
+  }
+}
+
+// =============================================================================
+// グリッド描画
+// =============================================================================
+
+/**
+ * MAP シートデータからグリッドを構築する。
+ * @param {{ values: string[][], numRows: number, numCols: number }} mapData
+ */
+function buildGrid(mapData) {
+  var table = document.getElementById("grid-table");
+  table.innerHTML = "";
+
+  for (var r = 0; r < mapData.numRows; r++) {
+    var tr = document.createElement("tr");
+    for (var c = 0; c < mapData.numCols; c++) {
+      var td = document.createElement("td");
+      td.className = "grid-cell";
+      td.dataset.row = String(r + 1); // 1 始まり
+      td.dataset.col = String(c + 1); // 1 始まり
+
+      // 地形ラベル
+      var terrainText = mapData.values[r][c];
+      if (terrainText !== "") {
+        var label = document.createElement("span");
+        label.className = "terrain-label";
+        label.textContent = terrainText;
+        td.appendChild(label);
+      }
+
+      // イベント登録
+      registerCellEvents(td);
+
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+}
+
+/**
+ * セルイベント（クリック・ドラッグターゲット）を登録する。
+ * @param {HTMLTableCellElement} td
+ */
+function registerCellEvents(td) {
+  // クリック: 未配置なら配置、配置済みなら無視
+  td.addEventListener("click", function(e) {
+    if (appState.dragState.isDragging) {
+      return;
+    }
+    var row = parseInt(td.dataset.row, 10);
+    var col = parseInt(td.dataset.col, 10);
+    handleCellClick(row, col);
+  });
+
+  // ドラッグオーバー: 視覚フィードバック
+  td.addEventListener("dragover", function(e) {
+    e.preventDefault();
+    td.classList.add("drag-over");
+  });
+  td.addEventListener("dragleave", function() {
+    td.classList.remove("drag-over");
+  });
+
+  // ドロップ: ユニット移動
+  td.addEventListener("drop", function(e) {
+    e.preventDefault();
+    td.classList.remove("drag-over");
+    var row = parseInt(td.dataset.row, 10);
+    var col = parseInt(td.dataset.col, 10);
+    handleDrop(row, col);
+  });
+}
+
+/**
+ * ユニット表示をすべて再描画する。
+ * @param {{ [userKey: string]: { name: string, row: number, col: number } }} units
+ * @param {string} myUserKey
+ */
+function renderAllUnits(units, myUserKey) {
+  // 既存のユニット要素をすべて除去する
+  var existing = document.querySelectorAll(".unit");
+  for (var i = 0; i < existing.length; i++) {
+    existing[i].remove();
+  }
+
+  Object.keys(units).forEach(function(userKey) {
+    var unit = units[userKey];
+    if (!unit || unit.row == null || unit.col == null) {
+      return;
+    }
+    renderUnit(userKey, unit, myUserKey);
+  });
+}
+
+/**
+ * 特定ユーザーのユニットを描画する（既存があれば更新）。
+ * @param {string} userKey
+ * @param {{ name: string, row: number, col: number }} unit
+ * @param {string} myUserKey
+ */
+function renderUnit(userKey, unit, myUserKey) {
+  // 古い要素を除去する
+  var old = document.getElementById("unit-" + userKey);
+  if (old) {
+    old.remove();
+  }
+
+  var td = getCellElement(unit.row, unit.col);
+  if (!td) {
+    return;
+  }
+
+  var div = document.createElement("div");
+  div.className = "unit" + (userKey === myUserKey ? " mine" : "");
+  div.id = "unit-" + userKey;
+  div.style.background = resolveUnitColor(userKey);
+  div.title = unit.name;
+  div.textContent = unit.name.substring(0, 3);
+
+  if (userKey === myUserKey) {
+    // 自分のユニットはドラッグ可能
+    div.draggable = true;
+    div.addEventListener("dragstart", function(e) {
+      appState.dragState.isDragging = true;
+      appState.dragState.sourceRow  = unit.row;
+      appState.dragState.sourceCol  = unit.col;
+      div.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", userKey);
+    });
+    div.addEventListener("dragend", function() {
+      appState.dragState.isDragging = false;
+      div.classList.remove("dragging");
+    });
+  }
+
+  td.appendChild(div);
+}
+
+/**
+ * 行・列からセル要素を取得する（1 始まり）。
+ * @param {number} row
+ * @param {number} col
+ * @returns {HTMLTableCellElement|null}
+ */
+function getCellElement(row, col) {
+  return document.querySelector(
+    ".grid-cell[data-row='" + row + "'][data-col='" + col + "']"
+  );
+}
+
+// =============================================================================
+// ユーザー操作ハンドラ
+// =============================================================================
+
+/**
+ * セルクリック時の処理。
+ * 自分のユニットが未配置なら配置する。
+ * @param {number} row
+ * @param {number} col
+ */
+function handleCellClick(row, col) {
+  var cfg   = appState.clientConfig;
+  var units = appState.units;
+  var myUnit = units[cfg.userKey];
+
+  // 配置済みなら何もしない（移動はドラッグで行う）
+  if (myUnit && myUnit.row != null) {
+    return;
+  }
+
+  // マップ外チェック
+  if (!isInsideMap(row, col)) {
+    return;
+  }
+
+  saveUnitPosition(row, col);
+}
+
+/**
+ * ドロップ時の処理。自分のユニットを新しいマスへ移動する。
+ * @param {number} row
+ * @param {number} col
+ */
+function handleDrop(row, col) {
+  var cfg = appState.clientConfig;
+
+  // マップ外チェック
+  if (!isInsideMap(row, col)) {
+    appState.dragState.isDragging = false;
+    return;
+  }
+
+  // ドラッグ元と同じマスなら何もしない
+  if (
+    appState.dragState.sourceRow === row &&
+    appState.dragState.sourceCol === col
+  ) {
+    appState.dragState.isDragging = false;
+    return;
+  }
+
+  saveUnitPosition(row, col);
+  appState.dragState.isDragging = false;
+}
+
+/**
+ * 座標がマップ内かどうかを検証する。
+ * @param {number} row
+ * @param {number} col
+ * @returns {boolean}
+ */
+function isInsideMap(row, col) {
+  if (!appState.mapData) {
+    return false;
+  }
+  return (
+    row >= 1 && row <= appState.mapData.numRows &&
+    col >= 1 && col <= appState.mapData.numCols
+  );
+}
+
+// =============================================================================
+// Firebase 操作
+// =============================================================================
+
+/**
+ * Firebase を初期化してリアルタイム購読を開始する。
+ * @param {{ firebaseConfig: object, userKey: string, displayName: string, roomId: string }} cfg
+ */
+function initFirebase(cfg) {
+  setStatus("connecting", "Firebase に接続中...");
+
+  try {
+    // Firebase SDK は CDN から読み込む（下部の script タグを参照）
+    // すでに初期化済みの場合は既存のアプリを取得する
+    if (firebase.apps.length === 0) {
+      appState.firebaseApp = firebase.initializeApp(cfg.firebaseConfig);
+    } else {
+      appState.firebaseApp = firebase.apps[0];
+    }
+    appState.db = firebase.database();
+  } catch (e) {
+    showError("Firebase の初期化に失敗しました:\n" + e.message);
+    return;
+  }
+
+  subscribeUnits(cfg);
+  subscribePresence(cfg);
+  registerPresence(cfg);
+}
+
+/**
+ * units ノードをリアルタイム購読する。
+ * @param {{ userKey: string, displayName: string, roomId: string }} cfg
+ */
+function subscribeUnits(cfg) {
+  var unitsRef = appState.db.ref(ROOM_PATH + "/units");
+
+  unitsRef.on("value", function(snapshot) {
+    var data = snapshot.val() || {};
+    appState.units = data;
+    renderAllUnits(data, cfg.userKey);
+  }, function(err) {
+    showError("ユニットデータの購読に失敗しました:\n" + err.message);
+  });
+}
+
+/**
+ * presence ノードをリアルタイム購読する。
+ * @param {{ userKey: string, displayName: string }} cfg
+ */
+function subscribePresence(cfg) {
+  var presenceRef = appState.db.ref(ROOM_PATH + "/presence");
+
+  presenceRef.on("value", function(snapshot) {
+    var data = snapshot.val() || {};
+    appState.presence = data;
+    updatePresenceBar(data, appState.units);
+  }, function(err) {
+    // presence は補助情報なのでエラーをコンソールに留める
+    console.error("presence 購読エラー:", err.message);
+  });
+}
+
+/**
+ * 自分の presence を登録し、切断時に自動削除する。
+ * @param {{ userKey: string, displayName: string }} cfg
+ */
+function registerPresence(cfg) {
+  var myPresenceRef = appState.db.ref(
+    ROOM_PATH + "/presence/" + cfg.userKey
+  );
+  var myUnitRef = appState.db.ref(
+    ROOM_PATH + "/units/" + cfg.userKey + "/online"
+  );
+
+  // 接続状態ノードを監視して onDisconnect を設定する
+  var connectedRef = appState.db.ref(".info/connected");
+  connectedRef.on("value", function(snap) {
+    if (snap.val() === true) {
+      // 切断時に presence を削除する
+      myPresenceRef.onDisconnect().remove();
+
+      // presence を true に設定する
+      myPresenceRef.set(true);
+
+      // units の name を書き込む（存在しない場合のみ）
+      var myUnitNameRef = appState.db.ref(
+        ROOM_PATH + "/units/" + cfg.userKey + "/name"
+      );
+      myUnitNameRef.transaction(function(current) {
+        return current === null ? cfg.displayName : current;
+      });
+
+      setStatus("connected", "接続中 [" + cfg.displayName + "]");
+    } else {
+      setStatus("disconnected", "切断されました");
+    }
+  });
+}
+
+/**
+ * 自分のユニット位置を Firebase に保存する。
+ * @param {number} row
+ * @param {number} col
+ */
+function saveUnitPosition(row, col) {
+  var cfg = appState.clientConfig;
+  var myRef = appState.db.ref(ROOM_PATH + "/units/" + cfg.userKey);
+
+  var data = {
+    name:      cfg.displayName,
+    row:       row,
+    col:       col,
+    updatedAt: firebase.database.ServerValue.TIMESTAMP
+  };
+
+  myRef.update(data).catch(function(err) {
+    showError("位置の保存に失敗しました:\n" + err.message);
+  });
+}
+
+// =============================================================================
+// 初期化エントリポイント
+// =============================================================================
+
+/**
+ * Apps Script から設定とマップデータを取得してサイドバーを起動する。
+ */
+function initSidebar() {
+  // Firebase 設定を取得する
+  google.script.run
+    .withSuccessHandler(function(cfg) {
+      appState.clientConfig = cfg;
+
+      // マップデータを取得する
+      google.script.run
+        .withSuccessHandler(function(mapData) {
+          appState.mapData = mapData;
+
+          // ローディングを隠してマップを表示する
+          document.getElementById("loading-overlay").style.display = "none";
+          document.getElementById("map-container").style.display  = "block";
+
+          buildGrid(mapData);
+          initFirebase(cfg);
+        })
+        .withFailureHandler(function(err) {
+          document.getElementById("loading-overlay").style.display = "none";
+          showError("マップデータの取得に失敗しました:\n" + (err.message || err));
+        })
+        .getMapData();
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById("loading-overlay").style.display = "none";
+      showError("Firebase 設定の取得に失敗しました:\n" + (err.message || err));
+    })
+    .getClientConfig();
+}
+
+// DOM 読み込み完了後に起動する
+document.addEventListener("DOMContentLoaded", function() {
+  initSidebar();
+});
+</script>
+
+<!--
+  Firebase SDK (CDN)
+  バージョンは互換性が安定している 9.x compat 版を使用する。
+  compat 版は firebase.initializeApp() などのグローバル構文が使えるため
+  GAS サイドバーの制約下でも扱いやすい。
+-->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+</body>
+</html>
