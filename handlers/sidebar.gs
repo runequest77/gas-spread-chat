@@ -31,24 +31,48 @@ function getCharacterList() {
 
 /**
  * 指定したパレット番号のキャラクターの技能・属性リストを返します。
+ * パレットシートから直接読み取り、行番号付きで返します。
  * 内部管理キー（cname / pname / email / palette）と空キーは除外します。
  * @param {number} paletteNo - パレット番号（0～9）
- * @return {Array<{key: string, value: string}>}
+ * @return {Array<{row: number, key: string, value: string}>}
  */
 function getCharacterSkills(paletteNo) {
   var excludeKeys = ['palette', 'cname', 'pname', 'email'];
-  var palette = getPalette(paletteNo);
+  var sheet = c_sheet(PALETTE_SHEET_NAME);
+  var col = paletteNo * 2 + 1;
+  var d2Array = sheet.getRange(1, col, sheet.getMaxRows(), 2).getDisplayValues();
   var skills = [];
-  for (var key in palette) {
+  for (var i = 0; i < d2Array.length; i++) {
+    var key = d2Array[i][0];
+    var value = d2Array[i][1];
     if (!key || key.trim() === '') continue;
     // 秘匿マーカー「■」が先頭についているキーはスキップ
     if (key.charAt(0) === '\u25a0') continue;
     if (excludeKeys.indexOf(key) !== -1) continue;
-    var value = palette[key];
     if (value === undefined || value === null) continue;
-    skills.push({ key: key, value: String(value) });
+    skills.push({ row: i + 1, key: key, value: String(value) });
   }
   return skills;
+}
+
+/**
+ * サイドバーから編集された技能データをパレットシートに保存します。
+ * 各エントリの row をキーとして、該当セルのキー・値を上書きします。
+ * 保存後はパレットキャッシュをクリアします。
+ * @param {number} paletteNo - パレット番号（0～9）
+ * @param {Array<{row: number, key: string, value: string}>} skills - 保存する技能データ
+ */
+function saveCharacterSkills(paletteNo, skills) {
+  var sheet = c_sheet(PALETTE_SHEET_NAME);
+  var col = paletteNo * 2 + 1;
+  for (var i = 0; i < skills.length; i++) {
+    var s = skills[i];
+    var row = s.row;
+    if (row < palette_elementsStartRow) continue; // ヘッダ・画像行は保護
+    sheet.getRange(row, col).setValue(s.key);
+    sheet.getRange(row, col + 1).setValue(s.value);
+  }
+  clearPaletteCache(paletteNo);
 }
 
 /**
