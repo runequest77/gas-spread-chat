@@ -201,6 +201,18 @@
 
 <script>
 // =============================================================================
+// デバッグログユーティリティ
+// =============================================================================
+
+/**
+ * 常に有効なデバッグログヘルパー。
+ * prefix "[SharedMap]" を付けて console.log / warn / error に委譲する。
+ */
+var debugLog   = Function.prototype.bind.call(console.log,   console, "[SharedMap]");
+var debugWarn  = Function.prototype.bind.call(console.warn,  console, "[SharedMap WARN]");
+var debugError = Function.prototype.bind.call(console.error, console, "[SharedMap ERROR]");
+
+// =============================================================================
 // 定数・グローバル状態
 // =============================================================================
 
@@ -257,6 +269,7 @@ function resolveUnitColor(userKey) {
  * @param {string} msg
  */
 function showError(msg) {
+  debugError("showError:", msg);
   var el = document.getElementById("error-message");
   el.textContent = msg;
   el.style.display = "block";
@@ -305,6 +318,7 @@ function updatePresenceBar(presenceMap, unitsMap) {
  * @param {{ values: string[][], numRows: number, numCols: number }} mapData
  */
 function buildGrid(mapData) {
+  debugLog("buildGrid() start — rows:", mapData.numRows, "cols:", mapData.numCols);
   var table = document.getElementById("grid-table");
   table.innerHTML = "";
 
@@ -332,6 +346,7 @@ function buildGrid(mapData) {
     }
     table.appendChild(tr);
   }
+  debugLog("buildGrid() complete — cells built:", mapData.numRows * mapData.numCols);
 }
 
 /**
@@ -374,19 +389,27 @@ function registerCellEvents(td) {
  * @param {string} myUserKey
  */
 function renderAllUnits(units, myUserKey) {
+  var unitKeys = Object.keys(units);
+  debugLog("renderAllUnits() — total keys in snapshot:", unitKeys.length,
+    "myUserKey:", myUserKey, "keys:", unitKeys);
+
   // 既存のユニット要素をすべて除去する
   var existing = document.querySelectorAll(".unit");
   for (var i = 0; i < existing.length; i++) {
     existing[i].remove();
   }
 
-  Object.keys(units).forEach(function(userKey) {
+  var rendered = 0;
+  unitKeys.forEach(function(userKey) {
     var unit = units[userKey];
     if (!unit || unit.row == null || unit.col == null) {
+      debugWarn("renderAllUnits() skip — missing row/col for userKey:", userKey, "unit:", unit);
       return;
     }
     renderUnit(userKey, unit, myUserKey);
+    rendered++;
   });
+  debugLog("renderAllUnits() done — rendered:", rendered, "/", unitKeys.length);
 }
 
 /**
@@ -396,6 +419,9 @@ function renderAllUnits(units, myUserKey) {
  * @param {string} myUserKey
  */
 function renderUnit(userKey, unit, myUserKey) {
+  debugLog("renderUnit() userKey:", userKey, "row:", unit.row, "col:", unit.col,
+    "name:", unit.name, "isMe:", userKey === myUserKey);
+
   // 古い要素を除去する
   var old = document.getElementById("unit-" + userKey);
   if (old) {
@@ -404,6 +430,11 @@ function renderUnit(userKey, unit, myUserKey) {
 
   var td = getCellElement(unit.row, unit.col);
   if (!td) {
+    debugWarn("renderUnit() SKIP — target cell not found for userKey:", userKey,
+      "row:", unit.row, "col:", unit.col,
+      "mapBounds:", appState.mapData
+        ? { numRows: appState.mapData.numRows, numCols: appState.mapData.numCols }
+        : "mapData not loaded");
     return;
   }
 
@@ -461,13 +492,18 @@ function handleCellClick(row, col) {
   var units = appState.units;
   var myUnit = units[cfg.userKey];
 
+  debugLog("handleCellClick() row:", row, "col:", col,
+    "userKey:", cfg.userKey, "myUnit:", myUnit);
+
   // 配置済みなら何もしない（移動はドラッグで行う）
   if (myUnit && myUnit.row != null) {
+    debugLog("handleCellClick() — already placed, ignoring click");
     return;
   }
 
   // マップ外チェック
   if (!isInsideMap(row, col)) {
+    debugWarn("handleCellClick() — outside map bounds row:", row, "col:", col);
     return;
   }
 
@@ -482,8 +518,14 @@ function handleCellClick(row, col) {
 function handleDrop(row, col) {
   var cfg = appState.clientConfig;
 
+  debugLog("handleDrop() row:", row, "col:", col,
+    "userKey:", cfg.userKey,
+    "sourceRow:", appState.dragState.sourceRow,
+    "sourceCol:", appState.dragState.sourceCol);
+
   // マップ外チェック
   if (!isInsideMap(row, col)) {
+    debugWarn("handleDrop() — outside map bounds, ignoring drop");
     appState.dragState.isDragging = false;
     return;
   }
@@ -493,6 +535,7 @@ function handleDrop(row, col) {
     appState.dragState.sourceRow === row &&
     appState.dragState.sourceCol === col
   ) {
+    debugLog("handleDrop() — same cell as source, ignoring drop");
     appState.dragState.isDragging = false;
     return;
   }
@@ -526,18 +569,25 @@ function isInsideMap(row, col) {
  * @param {{ firebaseConfig: object, userKey: string, displayName: string, roomId: string }} cfg
  */
 function initFirebase(cfg) {
+  debugLog("initFirebase() start — userKey:", cfg.userKey,
+    "displayName:", cfg.displayName, "roomId:", cfg.roomId,
+    "projectId:", cfg.firebaseConfig && cfg.firebaseConfig.projectId);
   setStatus("connecting", "Firebase に接続中...");
 
   try {
     // Firebase SDK は CDN から読み込む（下部の script タグを参照）
     // すでに初期化済みの場合は既存のアプリを取得する
     if (firebase.apps.length === 0) {
+      debugLog("initFirebase() — creating new Firebase app");
       appState.firebaseApp = firebase.initializeApp(cfg.firebaseConfig);
     } else {
+      debugLog("initFirebase() — reusing existing Firebase app (apps.length:", firebase.apps.length, ")");
       appState.firebaseApp = firebase.apps[0];
     }
     appState.db = firebase.database();
+    debugLog("initFirebase() — Firebase database ready");
   } catch (e) {
+    debugError("initFirebase() — initialization failed:", e.message);
     showError("Firebase の初期化に失敗しました:\n" + e.message);
     return;
   }
@@ -553,12 +603,18 @@ function initFirebase(cfg) {
  */
 function subscribeUnits(cfg) {
   var unitsRef = appState.db.ref(ROOM_PATH + "/units");
+  debugLog("subscribeUnits() — listening on:", ROOM_PATH + "/units");
 
   unitsRef.on("value", function(snapshot) {
     var data = snapshot.val() || {};
+    var keys = Object.keys(data);
+    debugLog("subscribeUnits() snapshot — keys:", keys, "count:", keys.length,
+      "myUserKey:", cfg.userKey, "myUnitInSnapshot:", !!data[cfg.userKey],
+      "myUnitData:", data[cfg.userKey] || null);
     appState.units = data;
     renderAllUnits(data, cfg.userKey);
   }, function(err) {
+    debugError("subscribeUnits() — subscription error:", err.message);
     showError("ユニットデータの購読に失敗しました:\n" + err.message);
   });
 }
@@ -569,14 +625,20 @@ function subscribeUnits(cfg) {
  */
 function subscribePresence(cfg) {
   var presenceRef = appState.db.ref(ROOM_PATH + "/presence");
+  debugLog("subscribePresence() — listening on:", ROOM_PATH + "/presence");
 
   presenceRef.on("value", function(snapshot) {
     var data = snapshot.val() || {};
+    var onlineCount = Object.keys(data).reduce(function(count, k) {
+      return count + (data[k] === true ? 1 : 0);
+    }, 0);
+    debugLog("subscribePresence() snapshot — total keys:", Object.keys(data).length,
+      "online:", onlineCount, "myPresence:", data[cfg.userKey]);
     appState.presence = data;
     updatePresenceBar(data, appState.units);
   }, function(err) {
     // presence は補助情報なのでエラーをコンソールに留める
-    console.error("presence 購読エラー:", err.message);
+    debugError("subscribePresence() — subscription error:", err.message);
   });
 }
 
@@ -592,10 +654,13 @@ function registerPresence(cfg) {
     ROOM_PATH + "/units/" + cfg.userKey + "/online"
   );
 
+  debugLog("registerPresence() — presencePath:", ROOM_PATH + "/presence/" + cfg.userKey);
+
   // 接続状態ノードを監視して onDisconnect を設定する
   var connectedRef = appState.db.ref(".info/connected");
   connectedRef.on("value", function(snap) {
     if (snap.val() === true) {
+      debugLog("registerPresence() — connected: setting presence=true and registering onDisconnect");
       // 切断時に presence を削除する
       myPresenceRef.onDisconnect().remove();
 
@@ -607,11 +672,14 @@ function registerPresence(cfg) {
         ROOM_PATH + "/units/" + cfg.userKey + "/name"
       );
       myUnitNameRef.transaction(function(current) {
+        debugLog("registerPresence() name transaction — current:", current,
+          "will write:", current === null ? cfg.displayName : "(keep existing)");
         return current === null ? cfg.displayName : current;
       });
 
       setStatus("connected", "接続中 [" + cfg.displayName + "]");
     } else {
+      debugLog("registerPresence() — disconnected or not yet connected");
       setStatus("disconnected", "切断されました");
     }
   });
@@ -624,7 +692,8 @@ function registerPresence(cfg) {
  */
 function saveUnitPosition(row, col) {
   var cfg = appState.clientConfig;
-  var myRef = appState.db.ref(ROOM_PATH + "/units/" + cfg.userKey);
+  var refPath = ROOM_PATH + "/units/" + cfg.userKey;
+  var myRef = appState.db.ref(refPath);
 
   var data = {
     name:      cfg.displayName,
@@ -633,7 +702,12 @@ function saveUnitPosition(row, col) {
     updatedAt: firebase.database.ServerValue.TIMESTAMP
   };
 
-  myRef.update(data).catch(function(err) {
+  debugLog("saveUnitPosition() — ref:", refPath, "payload:", data);
+
+  myRef.update(data).then(function() {
+    debugLog("saveUnitPosition() — write succeeded for userKey:", cfg.userKey);
+  }).catch(function(err) {
+    debugError("saveUnitPosition() — write failed:", err.message);
     showError("位置の保存に失敗しました:\n" + err.message);
   });
 }
@@ -646,14 +720,21 @@ function saveUnitPosition(row, col) {
  * Apps Script から設定とマップデータを取得してサイドバーを起動する。
  */
 function initSidebar() {
+  debugLog("initSidebar() start");
+
   // Firebase 設定を取得する
   google.script.run
     .withSuccessHandler(function(cfg) {
+      debugLog("getClientConfig() success — userKey:", cfg.userKey,
+        "displayName:", cfg.displayName, "roomId:", cfg.roomId,
+        "firebaseProjectId:", cfg.firebaseConfig && cfg.firebaseConfig.projectId);
       appState.clientConfig = cfg;
 
       // マップデータを取得する
       google.script.run
         .withSuccessHandler(function(mapData) {
+          debugLog("getMapData() success — numRows:", mapData.numRows,
+            "numCols:", mapData.numCols);
           appState.mapData = mapData;
 
           // ローディングを隠してマップを表示する
@@ -664,12 +745,14 @@ function initSidebar() {
           initFirebase(cfg);
         })
         .withFailureHandler(function(err) {
+          debugError("getMapData() failure:", err.message || err);
           document.getElementById("loading-overlay").style.display = "none";
           showError("マップデータの取得に失敗しました:\n" + (err.message || err));
         })
         .getMapData();
     })
     .withFailureHandler(function(err) {
+      debugError("getClientConfig() failure:", err.message || err);
       document.getElementById("loading-overlay").style.display = "none";
       showError("Firebase 設定の取得に失敗しました:\n" + (err.message || err));
     })
@@ -678,6 +761,7 @@ function initSidebar() {
 
 // DOM 読み込み完了後に起動する
 document.addEventListener("DOMContentLoaded", function() {
+  debugLog("DOMContentLoaded — calling initSidebar()");
   initSidebar();
 });
 </script>
