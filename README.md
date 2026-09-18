@@ -7,7 +7,7 @@ The GAS deployment target is defined only by the tracked `.clasp.json` file. The
 When changing the development spreadsheet, update `.clasp.json` locally and commit that change before pushing GAS code. For local deployment, use:
 
 ```bash
-./scripts/clasp-push-safe.sh
+bash scripts/clasp-push-safe.sh
 ```
 
 The wrapper refuses to push when `.clasp.json` is missing, untracked, staged, or modified relative to `HEAD`. Direct `clasp push` still bypasses that guard.
