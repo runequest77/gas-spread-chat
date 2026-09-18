@@ -1,11 +1,10 @@
 name: Deploy to GAS
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      script_id:
-        description: 'Update Target Script ID'
-        required: true
 
 jobs:
   deploy:
@@ -14,15 +13,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check tracked deployment target
+        id: target
+        shell: bash
+        run: |
+          if [[ ! -f .clasp.json ]] || ! git ls-files --error-unmatch .clasp.json >/dev/null 2>&1; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::.clasp.json is not tracked yet; skipping GAS deployment."
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+
+          try {
+            const config = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
+            if (typeof config.scriptId !== 'string' || config.scriptId.trim() === '') {
+              throw new Error('.clasp.json must contain a non-empty scriptId.');
+            }
+          } catch (error) {
+            console.error('::error::Invalid tracked .clasp.json deployment config.');
+            console.error(error.message);
+            process.exit(1);
+          }
+          NODE
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
+        if: steps.target.outputs.enabled == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install clasp
+        if: steps.target.outputs.enabled == 'true'
         run: npm install -g @google/clasp
 
       - name: Create clasprc.json (Login)
+        if: steps.target.outputs.enabled == 'true'
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
@@ -37,8 +66,7 @@ jobs:
 
           if (normalizedSecretText === '') {
             console.error('::error::GitHub Actions received an empty value for secrets.CLASPRC_JSON.');
-            console.error('::error::This usually means the workflow could not access a non-empty secret with that exact name. Check the repository or environment secret scope, spelling, and whether the run context is allowed to read secrets.');
-            console.error('::notice::If the secret content were malformed JSON or had an encoding issue, this step would continue and fail later with a JSON parsing error instead of this empty-value error.');
+            console.error('::error::Check the repository secret scope, spelling, and whether the run context is allowed to read secrets.');
             process.exit(1);
           }
 
@@ -56,18 +84,8 @@ jobs:
             }
           }
 
-          if (credentials === null) {
-            console.error('::error::CLASPRC_JSON decoded to null; expected a JSON object for your clasp credentials.');
-            process.exit(1);
-          }
-
-          if (Array.isArray(credentials)) {
-            console.error('::error::CLASPRC_JSON decoded to an array; expected a JSON object for your clasp credentials.');
-            process.exit(1);
-          }
-
-          if (typeof credentials !== 'object') {
-            console.error('::error::CLASPRC_JSON decoded to a non-object value; expected a JSON object for your clasp credentials.');
+          if (credentials === null || Array.isArray(credentials) || typeof credentials !== 'object') {
+            console.error('::error::CLASPRC_JSON must decode to a JSON object.');
             process.exit(1);
           }
 
@@ -80,26 +98,6 @@ jobs:
           }
           NODE
 
-      - name: Generate config and Push (Target & Deploy)
-        env:
-          SCRIPT_ID: ${{ github.event.inputs.script_id }}
-        run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-
-          try {
-            if (!process.env.SCRIPT_ID || process.env.SCRIPT_ID.trim() === '') {
-              throw new Error('A non-empty script_id input is required.');
-            }
-
-            fs.writeFileSync('.clasp.json', JSON.stringify({
-              scriptId: process.env.SCRIPT_ID,
-              rootDir: '.',
-            }, null, 2));
-          } catch (error) {
-            console.error('::error::Failed to generate a valid .clasp.json deployment config.');
-            console.error(error.message);
-            process.exit(1);
-          }
-          NODE
-          clasp push -f
+      - name: Push to tracked GAS target
+        if: steps.target.outputs.enabled == 'true'
+        run: clasp push -f
